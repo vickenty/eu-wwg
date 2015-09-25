@@ -1,0 +1,198 @@
+package ExtUtils::WeakWrapperGenerator;
+
+use strict;
+use warnings;
+
+use Carp qw/croak/;
+use Scalar::Util qw/weaken/;
+
+our $VERSION = "0.1";
+
+sub parse_decls {
+    my $self = shift;
+    my $decl = shift =~ s/^\s*//mgr;
+
+    my @decl = split /\n/, $decl;
+    my @fns;
+    while (my ($type, $decl) = splice @decl, 0, 2) {
+        my ($name, $args) = $decl =~ /([^(]+)\(([^)]*)\)/;
+
+        die "no function name detected in $decl" unless $name;
+        die "no argument list detected in $decl" unless defined $args;
+
+        $type =~ s/\s+\*/Ptr/g;
+        $type =~ s/\s+/_/g;
+
+        my @args = split /, */, $args;
+        push @fns, {
+            type => $type,
+            name => $name,
+            args => \@args,
+        };
+
+    }
+
+    return @fns;
+}
+
+sub generate_wrapper {
+    my ($self, $xs_package, $fn) = @_;
+
+    my $impl = $xs_package->can($fn->{name});
+    return unless $impl;
+
+    my ($class, $name) = $self->parse_xs_name($fn->{name});
+    return unless $class and $name;
+
+    my $package = $self->package_for_class($class);
+
+    $self->init_package($package);
+    $self->init_package($fn->{type});
+
+    if (my $before = $package->can("BEFORE")) {
+        my $inner = $impl;
+        $impl = sub {
+            local *__ANON__ = "${package}::ANON_call_before";
+            my ($self) = @_;
+            $self->$before();
+            return $inner->(@_);
+        };
+    }
+
+    if (my $wrap = $fn->{type}->can("WRAP")) {
+        my $inner = $impl;
+        $impl = sub {
+            local *__ANON__ = "${package}::ANON_call_wrapper";
+            my $self = $_[0];
+            my $obj = $inner->(@_);
+            $obj->$wrap($self);
+        }
+    }
+
+    no strict "refs";
+    *{"${package}::$name"} = $impl;
+}
+
+sub generate_from_xs {
+    my ($self, $xs_package, $decl) = @_;
+    for my $fn ($self->parse_decls($decl)) {
+        next if $self->skip_xs_function($fn);
+        $self->generate_wrapper($xs_package, $fn);
+    }
+}
+
+sub generate_owned_class {
+    my ($self, $package_name, $owner_type, $owner_name, %opts) = @_;
+
+    my $owner_getter_name = $opts{owner_getter} //= "get_$owner_name";
+
+    my %stash;
+    my %methods;
+    $methods{WRAP} = sub {
+        my ($self, $owner) = @_;
+
+        if ($owner->isa($owner_type)) {
+            # owner reference can be used direcly.
+        }
+        elsif ($owner->can("$opts{owner_getter}")) {
+            # creating new object from another owned object, inherit owner from it.
+            $owner = $owner->$owner_getter_name();
+        }
+        else {
+            my $class = ref $self;
+            my $other = ref $owner;
+            die "$class: creating new owned object, but $other doesn't provide one.";
+        }
+
+        $stash{$self} = $owner;
+        weaken $stash{$self};
+
+        return $self;
+    };
+    
+    $methods{BEFORE} = sub {
+        my $self = shift;
+        my $class = ref $self;
+
+        croak("$class: this object is no longer usable because parent $owner_name was destroyed")
+            unless defined $stash{$self};
+    };
+
+    $methods{DESTROY} = sub {
+        my $self = shift;
+        delete $stash{$self};
+    };
+
+    $methods{$owner_getter_name} = sub {
+        my $self = shift;
+        return $stash{$self};
+    };
+
+    no strict "refs";
+    *{"${package_name}::$_"} = $methods{$_} foreach keys %methods;
+}
+
+1;
+__END__ 
+
+=head1 NAME
+
+ExtUtils::WeakWrapperGenerator - generate OO wrappers for OO C w
+
+=head1 DESCRIPTION
+
+Some C libraries are written in a nicely structured OO-like way. Others try to
+simplify developer's life by managing memory in chunks using scope or context
+objects. The former usually true for large libraries, and the latter makes
+bindings to garbage collected languages slightly less straightforward. Two things
+combined prove to be more work than its worth.
+
+This package can semi-automatically build OO-style wrappers for XS bindings to
+C libraries that have both OO-like design and context-style memory management.
+
+=head2 Assumptions
+
+Library functions are named in a way that clearly indicates which class it
+belongs and which method it implements. The first argument of the function is
+pointer to self.
+
+     void dancer_dance(dancer_t dancer, dance_t dance); // GOOD
+     void tango(int times, dancer_t dancer); // Not so much
+
+Library manages memory for the programmer, and lends pointers out. Lent pointers
+become invalid when memory managing object is destroyed (via a library call).
+
+     dancer_t* party_new_dancer(party_t party, const char* name);
+     party_over(party_t party); // frees all dancers created via party_new_dancer().
+
+It makes sense if borrowed objects become invalid once their owner is destroyed.
+
+     my $dancer = $party->new_dancer("Alice");
+     $party = undef;
+     $dancer->dance(); # dies "party is over"
+
+User is not averse to the idea of exposing types generated by xsubpp to the user.
+
+Given a snippet from the original XS file (functions and return types) for every
+XS function we do:
+
+=over
+
+=item * determine class and method name from the function name
+
+=item * resolve class name into corresponding Perl package name
+
+=item * call hooks to initialize packages for the class and return value
+
+=item * if return type package has method `WRAP`, it will be called on the
+value returned by XS function with current object as an argument
+
+=item * if class package implements `BEFORE` it will be called before calling
+XS function
+
+=back
+
+A helper is provided to generate packages that implement `WRAP` and `BEFORE`
+and utilize weak references to keep track of object's owner and die when it
+goes away.
+

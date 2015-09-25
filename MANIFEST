@@ -1,0 +1,6 @@
+lib/ExtUtils/WeakWrapperGenerator.pm
+LICENSE
+Makefile.PL
+MANIFEST			This list of files
+README.md
+t/01-weakwrapper.t
