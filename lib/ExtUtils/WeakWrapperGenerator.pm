@@ -137,7 +137,7 @@ __END__
 
 =head1 NAME
 
-ExtUtils::WeakWrapperGenerator - generate OO wrappers for OO C w
+ExtUtils::WeakWrapperGenerator - generate OO wrappers for OO-ish C libraries
 
 =head1 DESCRIPTION
 
@@ -184,15 +184,15 @@ XS function we do:
 
 =item * call hooks to initialize packages for the class and return value
 
-=item * if return type package has method `WRAP`, it will be called on the
+=item * if return type package has method C<WRAP>, it will be called on the
 value returned by XS function with current object as an argument
 
-=item * if class package implements `BEFORE` it will be called before calling
+=item * if class package implements C<BEFORE> it will be called before calling
 XS function
 
 =back
 
-A helper is provided to generate packages that implement `WRAP` and `BEFORE`
+A helper is provided to generate packages that implement C<WRAP> and C<BEFORE>
 and utilize weak references to keep track of object's owner and die when it
 goes away.
 

@@ -1,6 +1,6 @@
 # NAME
 
-ExtUtils::WeakWrapperGenerator - generate OO wrappers for OO C w
+ExtUtils::WeakWrapperGenerator - generate OO wrappers for OO-ish C libraries
 
 # DESCRIPTION
 
@@ -42,11 +42,11 @@ XS function we do:
 - determine class and method name from the function name
 - resolve class name into corresponding Perl package name
 - call hooks to initialize packages for the class and return value
-- if return type package has method \`WRAP\`, it will be called on the
+- if return type package has method `WRAP`, it will be called on the
 value returned by XS function with current object as an argument
-- if class package implements \`BEFORE\` it will be called before calling
+- if class package implements `BEFORE` it will be called before calling
 XS function
 
-A helper is provided to generate packages that implement \`WRAP\` and \`BEFORE\`
+A helper is provided to generate packages that implement `WRAP` and `BEFORE`
 and utilize weak references to keep track of object's owner and die when it
 goes away.
