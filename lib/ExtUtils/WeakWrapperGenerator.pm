@@ -81,6 +81,8 @@ sub generate_from_xs {
     }
 }
 
+sub skip_xs_function {}
+
 sub generate_owned_class {
     my ($self, $package_name, $owner_type, $owner_name, %opts) = @_;
 
