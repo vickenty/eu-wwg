@@ -19,28 +19,19 @@ package Raw {
 }
 
 package Wrapper {
-    use parent "ExtUtils::WeakWrapperGenerator";
-    __PACKAGE__->generate_owned_class("Wrapper::Owned", "Foo", "foo");
-
-    sub init_package {
-        my ($self, $package) = @_;
-
-        no strict "refs";
-        @{"Bar::ISA"} = "Wrapper::Owned"
-            if $package eq "Bar";
-    }
-
-    sub parse_xs_name {
-        my ($self, $name) = @_;
-        return $name =~ /([a-z]+)_(.*)/;
-    }
-
-    sub package_for_class {
-        my ($self, $class) = @_;
-        return ucfirst $class;
-    }
-
-    __PACKAGE__->generate_from_xs("Raw", q!
+    use ExtUtils::WeakWrapperGenerator;
+    ExtUtils::WeakWrapperGenerator->generate_owned_class("Wrapper::Owned", "Foo", "foo");
+    ExtUtils::WeakWrapperGenerator->generate_from_xs({
+        xs_package => "Raw",
+        parse_xs_name => sub {
+            my ($class, $method) = shift =~ /^([^_]+)_(.*)$/;
+            return (ucfirst $class, $method);
+        },
+        package_callback => sub {
+            my $package = shift;
+            @Bar::ISA = "Wrapper::Owned" if $package eq "Bar";
+        },
+    }, q!
         Foo
         foo_new()
         Bar

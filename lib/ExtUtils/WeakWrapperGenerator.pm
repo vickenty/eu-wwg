@@ -36,24 +36,26 @@ sub parse_decls {
 }
 
 sub generate_wrapper {
-    my ($self, $xs_package, $fn) = @_;
+    my ($self, $args, $fn) = @_;
 
-    my $impl = $xs_package->can($fn->{name});
-    return unless $impl;
+    my $xs_package = $args->{xs_package};
 
-    my ($class, $name) = $self->parse_xs_name($fn->{name});
-    return unless $class and $name;
+    my ($package, $name) = $args->{parse_xs_name}->($fn->{name});
+    return unless $package and $name;
 
-    my $package = $self->package_for_class($class);
+    if (my $cb = $args->{package_callback}) {
+        $cb->($package);
+        $cb->($fn->{type});
+    }
 
-    $self->init_package($package);
-    $self->init_package($fn->{type});
+    my $impl = $xs_package->can($fn->{name})
+        or die "$xs_package: $fn->{name} is missing";
 
     if (my $before = $package->can("BEFORE")) {
         my $inner = $impl;
         $impl = sub {
             local *__ANON__ = "${package}::ANON_call_before";
-            my ($self) = @_;
+            my $self = $_[0];
             $self->$before();
             return $inner->(@_);
         };
@@ -66,7 +68,7 @@ sub generate_wrapper {
             my $self = $_[0];
             my $obj = $inner->(@_);
             $obj->$wrap($self);
-        }
+        };
     }
 
     no strict "refs";
@@ -74,14 +76,11 @@ sub generate_wrapper {
 }
 
 sub generate_from_xs {
-    my ($self, $xs_package, $decl) = @_;
+    my ($self, $args, $decl) = @_;
     for my $fn ($self->parse_decls($decl)) {
-        next if $self->skip_xs_function($fn);
-        $self->generate_wrapper($xs_package, $fn);
+        $self->generate_wrapper($args, $fn);
     }
 }
-
-sub skip_xs_function {}
 
 sub generate_owned_class {
     my ($self, $package_name, $owner_type, $owner_name, %opts) = @_;
@@ -96,7 +95,7 @@ sub generate_owned_class {
         if ($owner->isa($owner_type)) {
             # owner reference can be used direcly.
         }
-        elsif ($owner->can("$opts{owner_getter}")) {
+        elsif ($owner->can($owner_getter_name)) {
             # creating new object from another owned object, inherit owner from it.
             $owner = $owner->$owner_getter_name();
         }
@@ -111,7 +110,7 @@ sub generate_owned_class {
 
         return $self;
     };
-    
+
     $methods{BEFORE} = sub {
         my $self = shift;
         my $class = ref $self;
@@ -135,7 +134,7 @@ sub generate_owned_class {
 }
 
 1;
-__END__ 
+__END__
 
 =head1 NAME
 
